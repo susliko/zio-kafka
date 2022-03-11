@@ -71,19 +71,21 @@ object KafkaTestUtils {
     clientInstanceId: Option[String] = None,
     allowAutoCreateTopics: Boolean = true,
     offsetRetrieval: OffsetRetrieval = OffsetRetrieval.Auto(),
-    restartStreamOnRebalancing: Boolean = false
+    restartStreamOnRebalancing: Boolean = false,
+    partitionAssignor: String = "org.apache.kafka.clients.consumer.RangeAssignor"
   ): URIO[Kafka, ConsumerSettings] =
     ZIO.serviceWith[Kafka] { (kafka: Kafka) =>
       val settings = ConsumerSettings(kafka.bootstrapServers)
         .withClientId(clientId)
         .withCloseTimeout(5.seconds)
         .withProperties(
-          ConsumerConfig.AUTO_OFFSET_RESET_CONFIG        -> "earliest",
-          ConsumerConfig.METADATA_MAX_AGE_CONFIG         -> "100",
-          ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG       -> "3000",
-          ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG    -> "250",
-          ConsumerConfig.MAX_POLL_RECORDS_CONFIG         -> "10",
-          ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG -> allowAutoCreateTopics.toString
+          ConsumerConfig.AUTO_OFFSET_RESET_CONFIG             -> "earliest",
+          ConsumerConfig.METADATA_MAX_AGE_CONFIG              -> "100",
+          ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG            -> "3000",
+          ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG         -> "250",
+          ConsumerConfig.MAX_POLL_RECORDS_CONFIG              -> "10",
+          ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG      -> allowAutoCreateTopics.toString,
+          ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG -> partitionAssignor
         )
         .withPerPartitionChunkPrefetch(16)
         .withOffsetRetrieval(offsetRetrieval)
@@ -114,7 +116,8 @@ object KafkaTestUtils {
     offsetRetrieval: OffsetRetrieval = OffsetRetrieval.Auto(),
     allowAutoCreateTopics: Boolean = true,
     diagnostics: Diagnostics = Diagnostics.NoOp,
-    restartStreamOnRebalancing: Boolean = false
+    restartStreamOnRebalancing: Boolean = false,
+    partitionAssignor: String = "org.apache.kafka.clients.consumer.RangeAssignor"
   ): ZLayer[Kafka with Clock, Throwable, Consumer] =
     (consumerSettings(
       clientId,
@@ -122,7 +125,8 @@ object KafkaTestUtils {
       clientInstanceId,
       allowAutoCreateTopics,
       offsetRetrieval,
-      restartStreamOnRebalancing
+      restartStreamOnRebalancing,
+      partitionAssignor
     ).toLayer ++
       ZLayer.environment[Clock] ++
       ZLayer.succeed(diagnostics)) >>> Consumer.live

@@ -12,10 +12,49 @@ import zio.stream.{ ZSink, ZStream }
 import zio.test.Assertion._
 import zio.test.TestAspect._
 import zio.test._
+import org.apache.kafka.common.errors.RebalanceInProgressException
 
 object ConsumerSpec extends DefaultRunnableSpec {
   override def spec: ZSpec[TestEnvironment, Throwable] =
     suite("Consumer Streaming")(
+      test("spawn unhandled RebalanceInProgressException") {
+        for {
+          _             <- ZIO.succeed(EmbeddedKafka.createCustomTopic("topic1", partitions = 2))
+          keepProducing <- Ref.make(true)
+          c1Started     <- Promise.make[Nothing, Unit]
+          _             <- (produceOne("topic1", "k", "v") *> keepProducing.get).repeatWhile(k => k).fork
+          c1 <- Consumer
+                  .subscribeAnd(Subscription.Topics(Set("topic1")))
+                  .plainStream(Serde.string, Serde.string)
+                  .mapZIO(_.offset.commit *> c1Started.succeed(()))
+                  .takeUntilZIO(_ => keepProducing.get.map(!_))
+                  .runDrain
+                  .provideSomeLayer[Kafka with Clock](
+                    consumer(
+                      "c1",
+                      Some("group"),
+                      partitionAssignor = "org.apache.kafka.clients.consumer.CooperativeStickyAssignor"
+                    )
+                  )
+                  .fork
+          _ <- c1Started.await
+          _ <-
+            Consumer
+              .subscribeAnd(Subscription.Topics(Set("topic1")))
+              .plainStream(Serde.string, Serde.string)
+              .mapZIO(_.offset.commit)
+              .take(1)
+              .runDrain
+              .provideSomeLayer[Kafka with Clock](
+                consumer(
+                  "c2",
+                  Some("group"),
+                  partitionAssignor = "org.apache.kafka.clients.consumer.CooperativeStickyAssignor"
+                )
+              ) *> keepProducing.set(false)
+          c1Outcome <- c1.join.either
+        } yield assert(c1Outcome)(isSubtype[Left[RebalanceInProgressException, Unit]](anything))
+      },
       test("export metrics") {
         for {
           metrics <- Consumer.metrics
